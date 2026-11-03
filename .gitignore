@@ -1,0 +1,8 @@
+.env
+data/
+recordings/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
+dist/
