@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
-from .config import FRONTEND_DIST, RECORDINGS_DIR, POLL_INTERVAL_SECONDS, STREAM_QUALITY, STREAM_CHECK_TIMEOUT_SECONDS
+from .config import FRONTEND_DIST, RECORDINGS_DIR, POLL_INTERVAL_SECONDS, STREAM_CHECK_TIMEOUT_SECONDS
 from .db import get_db, get_settings, init_db, reconcile_interrupted_recordings, save_settings
 from .monitor import Monitor
 from .recorder import Recorder
