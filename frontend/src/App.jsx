@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Activity, Archive, CircleDot, Download, HardDrive, Plus, Radio, RefreshCw, Trash2, Tv, X } from 'lucide-react'
+import { Activity, Archive, CircleDot, Download, HardDrive, Plus, Radio, RefreshCw, Settings as SettingsIcon, Trash2, Tv, X } from 'lucide-react'
 
 async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, {
@@ -35,6 +35,7 @@ export default function App() {
   const [records, setRecords] = useState([])
   const [stats, setStats] = useState({})
   const [settings, setSettings] = useState({})
+  const [settingsDirty, setSettingsDirty] = useState(false)
   const [login, setLogin] = useState('')
   const [filter, setFilter] = useState('all')
   const [tab, setTab] = useState('channels')
@@ -49,16 +50,37 @@ export default function App() {
       setChannels(channelData)
       setRecords(recordingData)
       setStats(statusData)
-      setSettings(settingData)
+      if (!settingsDirty) setSettings(settingData)
       setError('')
     } catch (exception) { setError(exception.message) }
-  }, [])
+  }, [settingsDirty])
 
   useEffect(() => {
     refresh()
     const timer = setInterval(refresh, 10000)
     return () => clearInterval(timer)
   }, [refresh])
+
+  async function saveSettings(event) {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      const saved = await api('/settings', { method: 'PUT', body: JSON.stringify({
+        stream_quality: settings.stream_quality,
+        storage_subdirectory: settings.storage_subdirectory || '',
+        filename_template: settings.filename_template,
+      }) })
+      setSettings(saved)
+      setSettingsDirty(false)
+      setError('')
+    } catch (exception) { setError(exception.message) }
+    finally { setBusy(false) }
+  }
+
+  function changeSetting(key, value) {
+    setSettings(current => ({ ...current, [key]: value }))
+    setSettingsDirty(true)
+  }
 
   async function addChannel(event) {
     event.preventDefault()
@@ -102,12 +124,12 @@ export default function App() {
       <div className="brand"><span><Radio /></span><div><b>Twitch Archive</b><small>STREAM MONITOR</small></div></div>
       <label className="sidebar-label">РАБОЧАЯ ОБЛАСТЬ</label>
       <button className={`nav ${tab === 'channels' ? 'active' : ''}`} onClick={() => setTab('channels')}><Tv />Каналы</button>
-      <button className={`nav ${tab === 'records' ? 'active' : ''}`} onClick={() => setTab('records')}><Archive />Архив <em>{stats.recordings || 0}</em></button>
+      <button className={`nav ${tab === 'records' ? 'active' : ''}`} onClick={() => setTab('records')}><Archive />Архив <em>{stats.recordings || 0}</em></button>\n      <button className={`nav ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}><SettingsIcon />Настройки</button>
       <div className="sidebottom"><label className="sidebar-label">СИСТЕМА</label><p><i /> Мониторинг активен</p><small>Опрос: {settings.poll_interval_seconds || '—'} сек.</small><small>Проверка: Streamlink, без API</small></div>
     </aside>
 
     <main>
-      <header><div><small>TWITCH / ARCHIVE</small><h1>{tab === 'channels' ? 'Мониторинг каналов' : 'Архив трансляций'}</h1></div><button className="icon" onClick={refresh} title="Обновить"><RefreshCw /></button></header>
+      <header><div><small>TWITCH / ARCHIVE</small><h1>{tab === 'channels' ? 'Мониторинг каналов' : tab === 'records' ? 'Архив трансляций' : 'Настройки записи'}</h1></div><button className="icon" onClick={refresh} title="Обновить"><RefreshCw /></button></header>
       {error && <div className="error" role="alert">{error}<button onClick={() => setError('')} aria-label="Закрыть"><X /></button></div>}
       <section className="stats">
         <article><Tv /><b>{stats.channels || 0}</b><small>Каналов</small></article>
@@ -138,6 +160,26 @@ export default function App() {
           {record.file_exists && <a className="icon" href={record.download_url} title="Скачать запись"><Download /></a>}
           {record.status !== 'recording' && record.status !== 'starting' && <button className="icon" onClick={() => removeRecording(record)} title="Удалить запись"><Trash2 /></button>}
         </div>)}
+      </section> : <section className="panel settings-panel">
+        <div className="heading"><div><h2>Параметры записи</h2><p>Настройки сохраняются в базе данных и применяются к новым записям.</p></div></div>
+        <form className="settings-form" onSubmit={saveSettings}>
+          <label>Качество потока
+            <select value={settings.stream_quality || 'best'} onChange={event => changeSetting('stream_quality', event.target.value)}>
+              {['best', '1080p60', '1080p', '720p60', '720p', '480p', '360p', 'worst'].map(value => <option key={value} value={value}>{value === 'best' ? 'Лучшее доступное' : value === 'worst' ? 'Худшее доступное' : value}</option>)}
+            </select>
+            <small>Это выбор качества, предоставляемого Twitch. Фактическое разрешение зависит от доступных вариантов трансляции.</small>
+          </label>
+          <label>Подкаталог хранения
+            <input value={settings.storage_subdirectory || ''} onChange={event => changeSetting('storage_subdirectory', event.target.value)} placeholder="Например: clips или streams/2026" />
+            <small>Каталог внутри {settings.storage_directory?.replace(settings.storage_subdirectory || '', '') || '/recordings'}. Корневой путь на хосте задаётся через RECORDINGS_HOST_DIR в .env.</small>
+          </label>
+          <label>Шаблон имени файла
+            <input value={settings.filename_template || '{date}_{time}_{channel}'} onChange={event => changeSetting('filename_template', event.target.value)} />
+            <small>Поля: {'{channel}'}, {'{date}'}, {'{time}'}, {'{title}'}, {'{id}'}. Расширение .ts добавляется автоматически.</small>
+          </label>
+          <div className="settings-preview"><b>Формат файла</b><span>MPEG-TS (.ts)</span><small>Исходная запись сохраняется без перекодирования. Конвертация в MP4/MKV будет отдельной задачей медиасервиса.</small></div>
+          <button className="primary" disabled={busy || !settingsDirty}><SettingsIcon />Сохранить настройки</button>
+        </form>
       </section>}
       <footer>Twitch Archive 1.1.0 <span>React · FastAPI · Streamlink</span></footer>
     </main>
