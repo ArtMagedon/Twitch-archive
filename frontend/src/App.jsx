@@ -124,7 +124,8 @@ export default function App() {
       <div className="brand"><span><Radio /></span><div><b>Twitch Archive</b><small>STREAM MONITOR</small></div></div>
       <label className="sidebar-label">РАБОЧАЯ ОБЛАСТЬ</label>
       <button className={`nav ${tab === 'channels' ? 'active' : ''}`} onClick={() => setTab('channels')}><Tv />Каналы</button>
-      <button className={`nav ${tab === 'records' ? 'active' : ''}`} onClick={() => setTab('records')}><Archive />Архив <em>{stats.recordings || 0}</em></button>\n      <button className={`nav ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}><SettingsIcon />Настройки</button>
+      <button className={`nav ${tab === 'records' ? 'active' : ''}`} onClick={() => setTab('records')}><Archive />Архив <em>{stats.recordings || 0}</em></button>
+      <button className={`nav ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}><SettingsIcon />Настройки</button>
       <div className="sidebottom"><label className="sidebar-label">СИСТЕМА</label><p><i /> Мониторинг активен</p><small>Опрос: {settings.poll_interval_seconds || '—'} сек.</small><small>Проверка: Streamlink, без API</small></div>
     </aside>
 
