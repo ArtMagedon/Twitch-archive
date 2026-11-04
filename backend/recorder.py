@@ -1,14 +1,15 @@
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
-from .config import RECORDINGS_DIR, STREAM_QUALITY
-from .db import get_db
+from datetime import datetime
+from .config import RECORDINGS_DIR
+from .db import get_db, get_settings
 
 log = logging.getLogger("recorder")
 
 def safe_name(value: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9._-]+", "_", value or "channel")[:80]
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", value or "channel").strip("._")
+    return (cleaned or "channel")[:100]
 
 class Recorder:
     def __init__(self):
@@ -25,20 +26,36 @@ class Recorder:
         channel_id, login = channel["id"], channel["login"]
         if self.active(channel_id):
             return
-        now = datetime.now(timezone.utc)
-        folder = RECORDINGS_DIR / safe_name(login) / now.strftime("%Y-%m-%d")
+        now = datetime.now().astimezone()
+        settings = get_settings()
+        subdirectory = settings["storage_subdirectory"].strip().strip("/")
+        base_dir = (RECORDINGS_DIR / subdirectory).resolve()
+        if RECORDINGS_DIR.resolve() not in base_dir.parents and base_dir != RECORDINGS_DIR.resolve():
+            raise ValueError("Некорректный подкаталог хранения")
+        folder = base_dir / safe_name(login) / now.strftime("%Y-%m-%d")
         folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"{now.strftime('%Y%m%d_%H%M%S')}_{safe_name(login)}.ts"
+        template = settings["filename_template"]
+        values = {
+            "channel": safe_name(login),
+            "date": now.strftime("%Y-%m-%d"),
+            "time": now.strftime("%H-%M-%S"),
+            "title": safe_name(stream.get("title") or "stream"),
+            "id": "pending",
+        }
         with get_db() as db:
             cursor = db.execute("""INSERT INTO recordings
                 (channel_id,stream_id,title,game_name,started_at,status,file_path)
                 VALUES (?,?,?,?,?,'starting',?)""",
-                (channel_id, stream.get("id"), stream.get("title"), stream.get("game_name"), now.isoformat(), str(path)))
+                (channel_id, stream.get("id"), stream.get("title"), stream.get("game_name"), now.isoformat(), str(folder / "pending.ts")))
             recording_id = cursor.lastrowid
+            values["id"] = str(recording_id)
+            path = folder / (safe_name(template.format_map(values)) + ".ts")
+            db.execute("UPDATE recordings SET file_path=? WHERE id=?", (str(path), recording_id))
+        quality = settings["stream_quality"]
         args = [
             "streamlink", "--force", "--webbrowser-headless", "yes",
             "--webbrowser-executable", "/usr/bin/chromium",
-            "--output", str(path), f"https://www.twitch.tv/{login}", STREAM_QUALITY,
+            "--output", str(path), f"https://www.twitch.tv/{login}", quality,
         ]
         try:
             process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.DEVNULL,
@@ -48,11 +65,11 @@ class Recorder:
             with get_db() as db:
                 db.execute("UPDATE recordings SET status='recording' WHERE id=?", (recording_id,))
             self.tasks[channel_id] = asyncio.create_task(self._watch(channel_id, recording_id, process, path))
-            log.info("Recording started: %s (recording id=%s)", login, recording_id)
+            log.info("Recording started: %s (recording id=%s, quality=%s)", login, recording_id, quality)
         except Exception as exc:
             with get_db() as db:
                 db.execute("UPDATE recordings SET status='error',ended_at=?,error=? WHERE id=?",
-                    (datetime.now(timezone.utc).isoformat(), str(exc), recording_id))
+                    (datetime.now().astimezone().isoformat(), str(exc), recording_id))
             log.exception("Failed to start Streamlink for %s", login)
 
     async def _watch(self, channel_id, recording_id, process, path):
@@ -68,7 +85,7 @@ class Recorder:
             stderr.decode(errors="replace")[-4000:] or f"Streamlink завершился с кодом {return_code}")
         with get_db() as db:
             db.execute("UPDATE recordings SET ended_at=?,status=?,file_size=?,error=? WHERE id=?",
-                (datetime.now(timezone.utc).isoformat(), status, file_size, error, recording_id))
+                (datetime.now().astimezone().isoformat(), status, file_size, error, recording_id))
         if self.processes.get(channel_id) is process:
             self.processes.pop(channel_id, None)
             self.tasks.pop(channel_id, None)
