@@ -175,7 +175,7 @@ export default function App() {
             <small>Каталог внутри {settings.storage_directory?.replace(settings.storage_subdirectory || '', '') || '/recordings'}. Корневой путь на хосте задаётся через RECORDINGS_HOST_DIR в .env.</small>
           </label>
           <label>Шаблон имени файла
-            <input value={settings.filename_template || '{date}_{time}_{channel}'} onChange={event => changeSetting('filename_template', event.target.value)} />
+            <input value={settings.filename_template || '{date}_{time}_{channel}_{id}'} onChange={event => changeSetting('filename_template', event.target.value)} />
             <small>Поля: {'{channel}'}, {'{date}'}, {'{time}'}, {'{title}'}, {'{id}'}. Расширение .ts добавляется автоматически.</small>
           </label>
           <div className="settings-preview"><b>Формат файла</b><span>MPEG-TS (.ts)</span><small>Исходная запись сохраняется без перекодирования. Конвертация в MP4/MKV будет отдельной задачей медиасервиса.</small></div>
