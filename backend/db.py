@@ -5,7 +5,7 @@ from .config import DATA_DIR, DB_PATH, STREAM_QUALITY
 DEFAULT_SETTINGS = {
     "stream_quality": STREAM_QUALITY,
     "storage_subdirectory": "",
-    "filename_template": "{date}_{time}_{channel}",
+    "filename_template": "{date}_{time}_{channel}_{id}",
 }
 
 @contextmanager
