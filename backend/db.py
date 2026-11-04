@@ -2,6 +2,12 @@ import sqlite3
 from contextlib import contextmanager
 from .config import DATA_DIR, DB_PATH
 
+DEFAULT_SETTINGS = {
+    "stream_quality": "best",
+    "storage_subdirectory": "",
+    "filename_template": "{date}_{time}_{channel}",
+}
+
 @contextmanager
 def get_db():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -49,9 +55,29 @@ def init_db():
           file_size INTEGER NOT NULL DEFAULT 0,
           error TEXT
         );
+        CREATE TABLE IF NOT EXISTS app_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
         CREATE INDEX IF NOT EXISTS idx_recordings_started ON recordings(started_at DESC);
         CREATE INDEX IF NOT EXISTS idx_recordings_channel ON recordings(channel_id);
         """)
+        for key, value in DEFAULT_SETTINGS.items():
+            db.execute("INSERT OR IGNORE INTO app_settings(key,value) VALUES (?,?)", (key, value))
+
+def get_settings():
+    with get_db() as db:
+        values = {row["key"]: row["value"] for row in db.execute("SELECT key,value FROM app_settings")}
+    return {**DEFAULT_SETTINGS, **values}
+
+def save_settings(values: dict):
+    with get_db() as db:
+        for key, value in values.items():
+            db.execute(
+                "INSERT INTO app_settings(key,value) VALUES (?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, str(value)),
+            )
 
 def reconcile_interrupted_recordings(recordings_dir):
     """Close database entries left active by an unclean container shutdown."""
