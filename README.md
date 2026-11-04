@@ -57,6 +57,19 @@ podman compose logs -f twitch-archive
 
 После запуска откройте `http://localhost:8080` или `http://SERVER_IP:8080`. Документация API доступна по адресу `http://SERVER_IP:8080/docs`.
 
+### Переход с Docker Compose
+
+Если предыдущая версия работала через Docker Compose и использовала bind mounts `./data` и `./recordings`, переносить базу и видео не нужно: это обычные каталоги на хосте. Сначала остановите старый контейнер, не удаляя каталоги:
+
+```bash
+docker compose down
+cp .env.example .env  # только если .env ещё не создан
+# Укажите RECORDINGS_HOST_DIR в .env: ./recordings или прежний абсолютный путь
+podman compose up -d --build
+```
+
+Не запускайте старый и новый контейнер одновременно: оба процесса будут обращаться к одной SQLite-базе и могут одновременно пытаться записывать один и тот же канал.
+
 Остановка и обслуживание:
 
 ```bash
