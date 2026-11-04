@@ -3,9 +3,9 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from .config import FRONTEND_DIST, RECORDINGS_DIR, POLL_INTERVAL_SECONDS, STREAM_QUALITY, STREAM_CHECK_TIMEOUT_SECONDS
-from .db import get_db, init_db, reconcile_interrupted_recordings
+from .db import get_db, get_settings, init_db, reconcile_interrupted_recordings, save_settings
 from .monitor import Monitor
 from .recorder import Recorder
 
@@ -19,6 +19,32 @@ class ChannelCreate(BaseModel):
 
 class ChannelUpdate(BaseModel):
     enabled: bool
+
+class SettingsUpdate(BaseModel):
+    stream_quality: str = Field(pattern=r"^(best|worst|1080p60|1080p|720p60|720p|480p|360p)$")
+    storage_subdirectory: str = Field(default="", max_length=100)
+    filename_template: str = Field(min_length=1, max_length=120)
+
+    @field_validator("storage_subdirectory")
+    @classmethod
+    def validate_storage_subdirectory(cls, value):
+        value = value.strip().strip("/")
+        if value and (value.startswith(".") or ".." in value.split("/") or not re.fullmatch(r"[A-Za-z0-9._/-]+", value)):
+            raise ValueError("Подкаталог может содержать только латиницу, цифры, точку, дефис, подчёркивание и /")
+        return value
+
+    @field_validator("filename_template")
+    @classmethod
+    def validate_filename_template(cls, value):
+        allowed = {"channel", "date", "time", "title", "id"}
+        tokens = re.findall(r"{([^{}]+)}", value)
+        if not tokens or any(token not in allowed for token in tokens):
+            raise ValueError("Используйте шаблон с полями {channel}, {date}, {time}, {title}, {id}")
+        if "{" in re.sub(r"{[^{}]+}", "", value) or "}" in re.sub(r"{[^{}]+}", "", value):
+            raise ValueError("Некорректные фигурные скобки в шаблоне")
+        if "/" in value or "\\" in value:
+            raise ValueError("Шаблон должен задавать только имя файла, без каталогов")
+        return value
 
 def serialize_channel(row):
     result = dict(row)
@@ -44,15 +70,27 @@ async def health():
 
 @app.get("/api/settings")
 async def settings():
+    saved = get_settings()
     return {
         "poll_interval_seconds": POLL_INTERVAL_SECONDS,
         "stream_check_timeout_seconds": STREAM_CHECK_TIMEOUT_SECONDS,
-        "stream_quality": STREAM_QUALITY,
+        "stream_quality": saved["stream_quality"],
+        "storage_directory": str(RECORDINGS_DIR / saved["storage_subdirectory"]),
+        "storage_subdirectory": saved["storage_subdirectory"],
+        "filename_template": saved["filename_template"],
+        "available_qualities": ["best", "1080p60", "1080p", "720p60", "720p", "480p", "360p", "worst"],
+        "file_format": "MPEG-TS (.ts)",
         "storage_limit": None,
         "chat_recording": False,
         "public_streams_only": True,
         "detection_method": "Streamlink (без Twitch Helix API)",
     }
+
+@app.put("/api/settings")
+async def update_settings(payload: SettingsUpdate):
+    values = payload.model_dump()
+    save_settings(values)
+    return await settings()
 
 @app.get("/api/status")
 async def status():
