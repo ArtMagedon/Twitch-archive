@@ -103,7 +103,7 @@ export default function App() {
       <label className="sidebar-label">РАБОЧАЯ ОБЛАСТЬ</label>
       <button className={`nav ${tab === 'channels' ? 'active' : ''}`} onClick={() => setTab('channels')}><Tv />Каналы</button>
       <button className={`nav ${tab === 'records' ? 'active' : ''}`} onClick={() => setTab('records')}><Archive />Архив <em>{stats.recordings || 0}</em></button>
-      <div className="sidebottom"><label className="sidebar-label">СИСТЕМА</label><p><i /> Мониторинг активен</p><small>Опрос: {settings.poll_interval_seconds || '—'} сек.</small></div>
+      <div className="sidebottom"><label className="sidebar-label">СИСТЕМА</label><p><i /> Мониторинг активен</p><small>Опрос: {settings.poll_interval_seconds || '—'} сек.</small><small>Проверка: Streamlink, без API</small></div>
     </aside>
 
     <main>
@@ -123,8 +123,8 @@ export default function App() {
           <div className="filters">{[['all', 'Все'], ['live', 'В эфире'], ['recording', 'Записываются'], ['offline', 'Не в эфире']].map(([key, label]) => <button key={key} className={filter === key ? 'chosen' : ''} onClick={() => setFilter(key)}>{label}</button>)}</div>
           {filteredChannels.length === 0 ? <div className="empty"><Tv /><b>{channels.length ? 'Нет каналов в этой категории' : 'Каналов пока нет'}</b><small>{channels.length ? 'Измените фильтр.' : 'Добавьте канал выше.'}</small></div> : filteredChannels.map(channel => <div className="channel" key={channel.id}>
             <div className="avatar">{(channel.display_name || channel.login)[0].toUpperCase()}</div>
-            <div className="channeltext"><b>{channel.display_name || channel.login} <small>@{channel.login}</small></b><p>{channel.stream_title || 'Ожидание трансляции'}{channel.game_name ? ` · ${channel.game_name}` : ''}</p>{channel.last_error && <small className="channel-error">Ошибка API: {channel.last_error}</small>}</div>
-            <div className="channelstatus"><ChannelStatus channel={channel} />{channel.is_live && <small>{channel.viewer_count || 0} зрителей</small>}</div>
+            <div className="channeltext"><b>{channel.display_name || channel.login} <small>@{channel.login}</small></b><p>{channel.stream_title || 'Ожидание трансляции'}{channel.game_name ? ` · ${channel.game_name}` : ''}</p>{channel.last_error && <small className="channel-error">Ошибка проверки: {channel.last_error}</small>}</div>
+            <div className="channelstatus"><ChannelStatus channel={channel} /></div>
             <input className="toggle" type="checkbox" aria-label={`Мониторинг ${channel.login}`} checked={Boolean(channel.enabled)} onChange={event => setChannelEnabled(channel, event.target.checked)} />
             <button className="icon" onClick={() => removeChannel(channel)} title="Удалить канал"><Trash2 /></button>
           </div>)}
@@ -139,7 +139,7 @@ export default function App() {
           {record.status !== 'recording' && record.status !== 'starting' && <button className="icon" onClick={() => removeRecording(record)} title="Удалить запись"><Trash2 /></button>}
         </div>)}
       </section>}
-      <footer>Twitch Archive 1.0.0 <span>React · FastAPI · Streamlink</span></footer>
+      <footer>Twitch Archive 1.1.0 <span>React · FastAPI · Streamlink</span></footer>
     </main>
   </div>
 }
