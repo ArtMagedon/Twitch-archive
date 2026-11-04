@@ -152,7 +152,7 @@ export default function App() {
           </div>)}
         </section>
         <div className="notice"><HardDrive /><div><b>Хранение без автоматического удаления</b><p>Архив не очищается автоматически. Следите за свободным местом на сервере.</p></div></div>
-      </> : <section className="panel">
+      </> : tab === 'records' ? <section className="panel">
         <div className="heading"><div><h2>Записанные трансляции</h2><p>Файлы, созданные Streamlink.</p></div><span>{records.length} записей</span></div>
         {records.length === 0 ? <div className="empty"><Archive /><b>Архив пока пуст</b><small>Записи появятся после обнаружения эфиров.</small></div> : records.map(record => <div className="record" key={record.id}>
           <div className="thumb"><Tv /></div><div className="channeltext"><b>{record.title || `Трансляция ${record.login}`}</b><p>@{record.login} · {formatDate(record.started_at)}</p><small>{record.game_name || 'Без категории'} · {formatSize(record.file_size)}</small></div>
