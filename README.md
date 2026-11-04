@@ -41,10 +41,11 @@ APP_PORT=8080
 RECORDINGS_HOST_DIR=./recordings
 POLL_INTERVAL_SECONDS=60
 STREAM_CHECK_TIMEOUT_SECONDS=25
+STREAM_QUALITY=best
 TZ=Europe/Bucharest
 ```
 
-`RECORDINGS_HOST_DIR` — путь на хостовой системе, куда Podman будет монтировать каталог видео. Можно задать абсолютный путь, например `/srv/twitch-archive/recordings`. Создайте его заранее и убедитесь, что пользователь, запускающий rootless Podman, имеет право записи.
+`RECORDINGS_HOST_DIR` — путь на хостовой системе, куда Podman будет монтировать каталог видео. `STREAM_QUALITY` задаёт начальное качество при первом запуске; после создания базы качество меняется в интерфейсе и хранится в SQLite. Можно задать абсолютный путь, например `/srv/twitch-archive/recordings`. Создайте его заранее и убедитесь, что пользователь, запускающий rootless Podman, имеет право записи.
 
 Запуск и сборка:
 
