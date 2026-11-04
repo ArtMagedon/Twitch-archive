@@ -4,13 +4,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from .config import FRONTEND_DIST, RECORDINGS_DIR, POLL_INTERVAL_SECONDS, STREAM_QUALITY
+from .config import FRONTEND_DIST, RECORDINGS_DIR, POLL_INTERVAL_SECONDS, STREAM_QUALITY, STREAM_CHECK_TIMEOUT_SECONDS
 from .db import get_db, init_db, reconcile_interrupted_recordings
 from .monitor import Monitor
 from .recorder import Recorder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-app = FastAPI(title="Twitch Archive API", version="1.0.0")
+app = FastAPI(title="Twitch Archive API", version="1.1.0")
 recorder = Recorder()
 monitor = Monitor(recorder)
 
@@ -44,8 +44,15 @@ async def health():
 
 @app.get("/api/settings")
 async def settings():
-    return {"poll_interval_seconds": POLL_INTERVAL_SECONDS, "stream_quality": STREAM_QUALITY,
-            "storage_limit": None, "chat_recording": False, "public_streams_only": True}
+    return {
+        "poll_interval_seconds": POLL_INTERVAL_SECONDS,
+        "stream_check_timeout_seconds": STREAM_CHECK_TIMEOUT_SECONDS,
+        "stream_quality": STREAM_QUALITY,
+        "storage_limit": None,
+        "chat_recording": False,
+        "public_streams_only": True,
+        "detection_method": "Streamlink (без Twitch Helix API)",
+    }
 
 @app.get("/api/status")
 async def status():
