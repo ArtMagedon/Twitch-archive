@@ -10,7 +10,7 @@ log = logging.getLogger("monitor")
 
 
 class Monitor:
-    """Detect live streams through Streamlink's Twitch plugin; no Twitch API credentials required."""
+    """Detect live streams through Streamlink's Twitch plugin; no Helix credentials required."""
 
     def __init__(self, recorder):
         self.recorder = recorder
@@ -31,7 +31,7 @@ class Monitor:
                 pass
         await self.recorder.stop_all()
 
-    async def _is_live(self, login: str) -> bool:
+    async def _get_stream(self, login: str) -> dict | None:
         url = f"https://www.twitch.tv/{login}"
         process = await asyncio.create_subprocess_exec(
             "streamlink", "--json", "--loglevel", "error", url,
@@ -47,19 +47,29 @@ class Monitor:
             await process.communicate()
             raise RuntimeError(f"Streamlink не ответил за {STREAM_CHECK_TIMEOUT_SECONDS} секунд")
 
-        if process.returncode == 0:
-            try:
-                payload = json.loads(stdout.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise RuntimeError("Streamlink вернул некорректный JSON") from exc
-            streams = payload.get("streams", {})
-            return bool(streams)
-
-        # Streamlink returns a non-zero exit code when the channel is offline or
-        # no playable streams are available. This is treated as an offline state.
         message = stderr.decode("utf-8", errors="replace").strip()
-        log.debug("Streamlink check for %s returned %s: %s", login, process.returncode, message[-500:])
-        return False
+        if process.returncode != 0:
+            # A normal offline channel has no playable streams. Other failures
+            # (network, plugin, Twitch changes) must remain visible as check errors.
+            if "no playable streams found" in message.lower() or "no streams found" in message.lower():
+                return None
+            raise RuntimeError(message[-1000:] or f"Streamlink завершился с кодом {process.returncode}")
+
+        try:
+            payload = json.loads(stdout.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Streamlink вернул некорректный JSON") from exc
+
+        if not payload.get("streams"):
+            return None
+
+        metadata = payload.get("metadata") or {}
+        return {
+            "id": metadata.get("id"),
+            "title": metadata.get("title"),
+            "game_name": metadata.get("category"),
+            "user_name": metadata.get("author") or login,
+        }
 
     async def check(self):
         with get_db() as db:
@@ -73,25 +83,26 @@ class Monitor:
         for channel in channels:
             login = channel["login"]
             try:
-                live = await self._is_live(login)
+                stream = await self._get_stream(login)
                 error = None
             except Exception as exc:
-                live = None
+                stream = None
                 error = str(exc)[:1000]
                 log.warning("Could not check channel %s: %s", login, error)
 
             with get_db() as db:
-                if live is None:
+                if error:
                     db.execute(
                         "UPDATE channels SET last_error=?,last_checked_at=? WHERE id=?",
                         (error, checked_at, channel["id"]),
                     )
                     continue
-                if live:
+                if stream:
                     db.execute(
-                        """UPDATE channels SET is_live=1,last_checked_at=?,last_error=NULL
-                        WHERE id=?""",
-                        (checked_at, channel["id"]),
+                        """UPDATE channels SET is_live=1,display_name=?,stream_title=?,game_name=?,
+                        viewer_count=NULL,started_at=NULL,last_checked_at=?,last_error=NULL WHERE id=?""",
+                        (stream.get("user_name"), stream.get("title"), stream.get("game_name"),
+                         checked_at, channel["id"]),
                     )
                 else:
                     db.execute(
@@ -101,10 +112,8 @@ class Monitor:
                         (checked_at, channel["id"]),
                     )
 
-            if live:
-                # Stream metadata is not available without Helix; Streamlink resolves
-                # the actual stream when the recorder process starts.
-                await self.recorder.start(channel, {})
+            if stream:
+                await self.recorder.start(channel, stream)
 
     async def _loop(self):
         while self.running:
