@@ -1,6 +1,9 @@
 services:
   twitch-archive:
-    build: .
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: localhost/twitch-archive:latest
     container_name: twitch-archive
     restart: unless-stopped
     env_file:
@@ -10,10 +13,10 @@ services:
       RECORDINGS_DIR: /recordings
       FRONTEND_DIST: /app/frontend/dist
     ports:
-      - "8080:8000"
+      - "${APP_PORT:-8080}:8000"
     volumes:
-      - ./data:/data
-      - ./recordings:/recordings
+      - ./data:/data:Z
+      - ${RECORDINGS_HOST_DIR:-./recordings}:/recordings:Z
     stop_grace_period: 30s
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
