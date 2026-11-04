@@ -1,9 +1,9 @@
 import sqlite3
 from contextlib import contextmanager
-from .config import DATA_DIR, DB_PATH
+from .config import DATA_DIR, DB_PATH, STREAM_QUALITY
 
 DEFAULT_SETTINGS = {
-    "stream_quality": "best",
+    "stream_quality": STREAM_QUALITY,
     "storage_subdirectory": "",
     "filename_template": "{date}_{time}_{channel}",
 }
