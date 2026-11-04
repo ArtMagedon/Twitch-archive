@@ -7,6 +7,7 @@ from .config import POLL_INTERVAL_SECONDS, STREAM_CHECK_TIMEOUT_SECONDS
 from .db import get_db
 
 log = logging.getLogger("monitor")
+BROWSER_ARGS = ["--webbrowser-headless", "yes", "--webbrowser-executable", "/usr/bin/chromium"]
 
 
 class Monitor:
@@ -34,7 +35,7 @@ class Monitor:
     async def _get_stream(self, login: str) -> dict | None:
         url = f"https://www.twitch.tv/{login}"
         process = await asyncio.create_subprocess_exec(
-            "streamlink", "--json", "--loglevel", "error", url,
+            "streamlink", "--json", "--loglevel", "error", *BROWSER_ARGS, url,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -49,8 +50,6 @@ class Monitor:
 
         message = stderr.decode("utf-8", errors="replace").strip()
         if process.returncode != 0:
-            # A normal offline channel has no playable streams. Other failures
-            # (network, plugin, Twitch changes) must remain visible as check errors.
             if "no playable streams found" in message.lower() or "no streams found" in message.lower():
                 return None
             raise RuntimeError(message[-1000:] or f"Streamlink завершился с кодом {process.returncode}")
