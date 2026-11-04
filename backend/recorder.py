@@ -35,7 +35,11 @@ class Recorder:
                 VALUES (?,?,?,?,?,'starting',?)""",
                 (channel_id, stream.get("id"), stream.get("title"), stream.get("game_name"), now.isoformat(), str(path)))
             recording_id = cursor.lastrowid
-        args = ["streamlink", "--force", "--output", str(path), f"https://www.twitch.tv/{login}", STREAM_QUALITY]
+        args = [
+            "streamlink", "--force", "--webbrowser-headless", "yes",
+            "--webbrowser-executable", "/usr/bin/chromium",
+            "--output", str(path), f"https://www.twitch.tv/{login}", STREAM_QUALITY,
+        ]
         try:
             process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE)
