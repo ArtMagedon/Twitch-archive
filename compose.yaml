@@ -10,22 +10,17 @@ services:
       DATA_DIR: /data
       RECORDINGS_DIR: /recordings
       FRONTEND_DIST: /app/frontend/dist
-      HOST_STORAGE_ROOTS: /host/mnt,/host/media
+      HOST_STORAGE_ROOTS: /media/miko
     ports:
       - "8080:8000"
     volumes:
       - ./data:/data
       - ./recordings:/recordings
-      # Receive host mount/unmount events for external drives.
-      # Drives must be mounted by the host under /mnt or /media.
+      # Expose the user's media directory at the same path inside the container.
+      # External drives mounted below /media/miko remain visible via rslave propagation.
       - type: bind
-        source: /mnt
-        target: /host/mnt
-        bind:
-          propagation: rslave
-      - type: bind
-        source: /media
-        target: /host/media
+        source: /media/miko
+        target: /media/miko
         bind:
           propagation: rslave
     stop_grace_period: 30s
