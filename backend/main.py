@@ -13,8 +13,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import (
-    CLIENT_ID,
-    CLIENT_SECRET,
     DATA_DIR,
     DB_PATH,
     FRONTEND_DIST,
@@ -22,11 +20,13 @@ from .config import (
     POLL_INTERVAL_SECONDS,
     RECORDINGS_DIR,
     STREAM_QUALITY,
+    STREAM_CHECK_TIMEOUT_SECONDS,
 )
-from .db import get_db, init_db, reconcile_interrupted_recordings
+from .db import get_db, get_setting, init_db, reconcile_interrupted_recordings, set_setting
 from .monitor import Monitor
 from .observability import get_log_components, get_logs, setup_logging
 from .recorder import Recorder
+from .streamlink_probe import StreamlinkProbeError, probe_twitch_channel, streamlink_browser_available
 from .storage import (
     StorageUnavailableError,
     get_storage_payload,
@@ -52,6 +52,12 @@ class ChannelUpdate(BaseModel):
 
 class StorageUpdate(BaseModel):
     device_id: str | None = None
+
+
+class StreamQualityUpdate(BaseModel):
+    stream_quality: str = Field(
+        pattern=r"^(best|worst|1080p60|1080p|720p60|720p|480p|360p)$"
+    )
 
 
 def serialize_channel(row):
@@ -94,12 +100,22 @@ async def health():
 async def settings():
     return {
         "poll_interval_seconds": POLL_INTERVAL_SECONDS,
-        "stream_quality": STREAM_QUALITY,
+        "stream_check_timeout_seconds": STREAM_CHECK_TIMEOUT_SECONDS,
+        "stream_quality": get_setting("stream_quality", STREAM_QUALITY) or STREAM_QUALITY,
+        "available_qualities": ["best", "1080p60", "1080p", "720p60", "720p", "480p", "360p", "worst"],
+        "detection_method": "Streamlink Twitch plugin (без Helix credentials)",
         "storage_limit": None,
         "chat_recording": False,
         "public_streams_only": True,
         "storage": get_storage_payload(),
     }
+
+
+@app.put("/api/settings")
+async def update_settings(payload: StreamQualityUpdate):
+    set_setting("stream_quality", payload.stream_quality)
+    log.success("Качество записи изменено: %s", payload.stream_quality)
+    return await settings()
 
 
 @app.get("/api/status")
@@ -323,20 +339,22 @@ async def diagnostics():
             "python": sys.version.split()[0],
             "platform": platform.platform(),
         },
-        "twitch": {
-            "credentials_configured": bool(CLIENT_ID and CLIENT_SECRET),
-            "client_id_present": bool(CLIENT_ID),
-            "client_secret_present": bool(CLIENT_SECRET),
-            "access_token_cached": bool(monitor.twitch.token),
-            "token_expires_in_seconds": max(
-                0, round(monitor.twitch.expires_at - datetime.now().timestamp())
-            ) if monitor.twitch.token else 0,
+        "stream_detection": {
+            "method": "Streamlink Twitch plugin",
+            "helix_api_used": False,
+            "credentials_required": False,
+            "probe_timeout_seconds": STREAM_CHECK_TIMEOUT_SECONDS,
+            "parallel_checks": monitor.diagnostics()["max_parallel_checks"],
         },
         "streamlink": {
             "available": shutil.which("streamlink") is not None,
             "executable": shutil.which("streamlink"),
             "version": streamlink_version,
-            "quality": STREAM_QUALITY,
+            "quality": get_setting("stream_quality", STREAM_QUALITY) or STREAM_QUALITY,
+            "webbrowser_enabled": True,
+            "webbrowser_headless": True,
+            "chromium_available": streamlink_browser_available()[1] is not None,
+            "chromium_executable": streamlink_browser_available()[1],
             "processes": recorder.diagnostics(),
         },
         "monitor": monitor.diagnostics(),
@@ -352,17 +370,6 @@ async def diagnostics():
         },
         "recordings_directory_default": str(RECORDINGS_DIR),
     }
-
-
-@app.post("/api/diagnostics/twitch")
-async def test_twitch_connection():
-    try:
-        result = await monitor.twitch.check_connection()
-        log.success("Проверка подключения к Twitch API завершилась успешно")
-        return result
-    except Exception as exc:
-        log.exception("Проверка подключения к Twitch API завершилась ошибкой")
-        return {"ok": False, "error": str(exc)}
 
 
 @app.post("/api/diagnostics/streamlink")
@@ -390,6 +397,60 @@ async def test_streamlink():
     except Exception as exc:
         log.exception("Не удалось выполнить Streamlink --version")
         return {"ok": False, "error": str(exc)}
+
+
+@app.post("/api/diagnostics/streamlink/channel")
+async def probe_streamlink_channel(payload: ChannelCreate):
+    login = payload.login.lower()
+    try:
+        result = await probe_twitch_channel(
+            login,
+            timeout=STREAM_CHECK_TIMEOUT_SECONDS,
+            loglevel="debug",
+        )
+        live = bool(result["live"])
+        if live:
+            log.success(
+                "Диагностическая проверка @%s: поток найден, доступные качества=%s",
+                login,
+                ", ".join(result.get("available_qualities", [])),
+                extra={"channel": login},
+            )
+        else:
+            log.info(
+                "Диагностическая проверка @%s: поток не обнаружен",
+                login,
+                extra={"channel": login},
+            )
+        return {
+            "ok": True,
+            "live": live,
+            "channel": login,
+            "available_qualities": result.get("available_qualities", []),
+            "metadata": result.get("metadata", {}),
+            "stderr": result.get("stderr", ""),
+        }
+    except StreamlinkProbeError as exc:
+        details = exc.as_dict()
+        log.error(
+            "Проверка @%s через Streamlink завершилась ошибкой: %s",
+            login,
+            str(exc),
+            extra={"channel": login, "exit_code": exc.exit_code},
+        )
+        return {"ok": False, "live": None, "channel": login, **details}
+    except Exception as exc:
+        log.exception(
+            "Не удалось проверить Twitch-канал @%s через Streamlink",
+            login,
+            extra={"channel": login},
+        )
+        return {
+            "ok": False,
+            "live": None,
+            "channel": login,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 if FRONTEND_DIST.exists():

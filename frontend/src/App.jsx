@@ -98,6 +98,9 @@ export default function App() {
   const [records, setRecords] = useState([])
   const [stats, setStats] = useState({})
   const [settings, setSettings] = useState({})
+  const [settingsDirty, setSettingsDirty] = useState(false)
+  const settingsDirtyRef = useRef(false)
+  const [probeLogin, setProbeLogin] = useState('')
   const [storage, setStorage] = useState({ devices: [] })
   const [diagnostics, setDiagnostics] = useState(null)
   const [diagnosticTests, setDiagnosticTests] = useState({})
@@ -134,7 +137,10 @@ export default function App() {
       setChannels(channelData)
       setRecords(recordingData)
       setStats(statusData)
-      setSettings(settingData)
+      setSettings(current => ({
+        ...settingData,
+        ...(settingsDirtyRef.current ? { stream_quality: current.stream_quality } : {}),
+      }))
       setStorage(storageData)
       setError('')
     } catch (exception) {
@@ -298,7 +304,7 @@ export default function App() {
       setDiagnosticTests(current => ({ ...current, [key]: result }))
       await refreshDiagnostics()
       if (!result.ok) {
-        showError(`Проверка ${key === 'twitch' ? 'Twitch API' : 'Streamlink'} не пройдена`, result.error || 'Проверка завершилась ошибкой.', {
+        showError(`Проверка Streamlink не пройдена`, result.error || 'Проверка завершилась ошибкой.', {
           component: key,
           extra: result,
         })
@@ -306,6 +312,65 @@ export default function App() {
     } catch (exception) {
       setDiagnosticTests(current => ({ ...current, [key]: { ok: false, error: exception.message } }))
       showError('Ошибка диагностической проверки', exception.message, { status: exception.status })
+    }
+  }
+
+  async function runStreamlinkChannelProbe() {
+    const loginToProbe = (probeLogin || channels[0]?.login || '').trim().replace(/^@/, '')
+    if (!loginToProbe) {
+      showError('Не выбран канал', 'Добавьте канал в мониторинг или выберите канал для проверки.')
+      return
+    }
+    setProbeLogin(loginToProbe)
+    setDiagnosticTests(current => ({ ...current, 'streamlink-channel': { loading: true } }))
+    try {
+      const result = await api('/diagnostics/streamlink/channel', {
+        method: 'POST',
+        body: JSON.stringify({ login: loginToProbe }),
+      })
+      setDiagnosticTests(current => ({ ...current, 'streamlink-channel': result }))
+      if (!result.ok) {
+        showError(`Streamlink не смог проверить @${loginToProbe}`, result.error || 'Проверка завершилась ошибкой.', {
+          component: 'monitor',
+          channel: loginToProbe,
+          exit_code: result.exit_code,
+          exception: result.stderr,
+          extra: result,
+        })
+      }
+      await refreshDiagnostics()
+    } catch (exception) {
+      setDiagnosticTests(current => ({ ...current, 'streamlink-channel': { ok: false, error: exception.message } }))
+      showError('Ошибка проверки канала через Streamlink', exception.message, { status: exception.status })
+    }
+  }
+
+  function changeStreamQuality(value) {
+    settingsDirtyRef.current = true
+    setSettingsDirty(true)
+    setSettings(current => ({ ...current, stream_quality: value }))
+  }
+
+  async function saveStreamQuality(event) {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      const saved = await api('/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ stream_quality: settings.stream_quality }),
+      })
+      settingsDirtyRef.current = false
+      setSettingsDirty(false)
+      setSettings(saved)
+      setError('')
+      setErrorDetails(null)
+    } catch (exception) {
+      showError('Не удалось сохранить качество записи', exception.message, {
+        status: exception.status,
+        exception: exception.detail ? JSON.stringify(exception.detail, null, 2) : null,
+      })
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -510,23 +575,36 @@ export default function App() {
 
         {consoleTab === 'diagnostics' && <div className="diagnostics-view">
           <div className="diagnostic-actions">
-            <button className="primary" onClick={() => runDiagnostic('/diagnostics/twitch', 'twitch')}><Wifi />Проверить Twitch API</button>
-            <button className="secondary" onClick={() => runDiagnostic('/diagnostics/streamlink', 'streamlink')}><Activity />Проверить Streamlink</button>
+            <button className="primary" onClick={() => runDiagnostic('/diagnostics/streamlink', 'streamlink')}><Activity />Проверить Streamlink</button>
+            <select
+              className="probe-select"
+              aria-label="Канал для проверки"
+              value={probeLogin || channels[0]?.login || ''}
+              onChange={event => setProbeLogin(event.target.value)}
+            >
+              <option value="">Выберите канал…</option>
+              {channels.map(channel => <option key={channel.id} value={channel.login}>@{channel.login}</option>)}
+            </select>
+            <button className="secondary" onClick={runStreamlinkChannelProbe} disabled={!channels.length}><Wifi />Проверить эфир</button>
             <button className="secondary" onClick={refreshDiagnostics}><RefreshCw />Обновить диагностику</button>
           </div>
           {Object.entries(diagnosticTests).map(([key, result]) => <div className={`test-result ${result.loading ? 'loading' : result.ok ? 'passed' : 'failed'}`} key={key}>
-            {result.loading ? 'Проверка выполняется…' : result.ok ? 'Проверка пройдена' : 'Проверка не пройдена'} · {key === 'twitch' ? 'Twitch API' : 'Streamlink'}
-            {!result.loading && <span>{result.version || result.error || ''}</span>}
+            {result.loading ? 'Проверка выполняется…' : result.ok ? 'Проверка пройдена' : 'Проверка не пройдена'} · {key === 'streamlink-channel' ? `Streamlink @${result.channel || probeLogin}` : 'Streamlink'}
+            {!result.loading && <span>{result.version || result.error || (key === 'streamlink-channel' ? result.live ? `эфир найден · ${(result.available_qualities || []).join(', ')}` : 'эфир не обнаружен' : '')}</span>}
           </div>)}
           {!diagnostics ? <div className="empty"><Activity /><b>Загрузка диагностики…</b></div> : <>
             <div className="diagnostic-grid">
               <article><Database /><small>База данных</small><b className={diagnostics.database?.accessible ? 'good' : 'bad'}>{diagnostics.database?.accessible ? 'Доступна' : 'Ошибка'}</b><span>{diagnostics.database?.journal_mode || '—'} · {diagnostics.database?.recordings ?? 0} записей</span></article>
-              <article><Wifi /><small>Twitch API</small><b className={diagnostics.twitch?.credentials_configured ? 'good' : 'bad'}>{diagnostics.twitch?.credentials_configured ? 'Ключи настроены' : 'Нет ключей'}</b><span>{diagnostics.twitch?.access_token_cached ? 'Токен в памяти' : 'Токен ещё не получен'}</span></article>
-              <article><Activity /><small>Streamlink</small><b className={diagnostics.streamlink?.available ? 'good' : 'bad'}>{diagnostics.streamlink?.available ? 'Доступен' : 'Не найден'}</b><span>{diagnostics.streamlink?.version || 'Версия не определена'}</span></article>
+              <article><Wifi /><small>Обнаружение эфиров</small><b className="good">Streamlink</b><span>Helix API и Client ID/Secret не используются</span></article>
+              <article><Activity /><small>Streamlink + Chromium</small><b className={diagnostics.streamlink?.available && diagnostics.streamlink?.chromium_available ? 'good' : 'bad'}>{diagnostics.streamlink?.available ? diagnostics.streamlink?.chromium_available ? 'Готовы' : 'Нет Chromium' : 'Streamlink не найден'}</b><span>{diagnostics.streamlink?.version || 'Версия не определена'}</span></article>
               <article><HardDrive /><small>Хранилище</small><b className={diagnostics.storage?.available ? 'good' : 'bad'}>{diagnostics.storage?.available ? 'Доступно' : 'Недоступно'}</b><span>{diagnostics.storage?.path || diagnostics.storage?.error || '—'}</span></article>
             </div>
             <div className="diagnostic-block">
               <h3>Цикл мониторинга</h3>
+              <div><span>Метод обнаружения</span><b>Streamlink Twitch plugin</b></div>
+              <div><span>Проверка Helix API</span><b>Не используется</b></div>
+              <div><span>Таймаут одной проверки</span><b>{diagnostics.monitor?.probe_timeout_seconds ?? '—'} сек.</b></div>
+              <div><span>Параллельных проверок</span><b>{diagnostics.monitor?.max_parallel_checks ?? '—'}</b></div>
               <div><span>Последняя попытка</span><b>{formatDate(diagnostics.monitor?.last_check_at)}</b></div>
               <div><span>Последняя успешная проверка</span><b>{formatDate(diagnostics.monitor?.last_success_at)}</b></div>
               <div><span>Ошибок подряд</span><b>{diagnostics.monitor?.consecutive_failures ?? 0}</b></div>
@@ -565,10 +643,23 @@ export default function App() {
           {storage.error && <p>{storage.error} Запись не будет перенаправлена на системный диск.</p>}
         </div>
         <div className="notice"><AlertTriangle /><div><b>Безопасность внешнего диска</b><p>Приложение обнаруживает уже смонтированные разделы, но не монтирует их само. Если выбранный диск отключить, новые записи остановятся с ошибкой вместо скрытой записи во внутреннюю файловую систему.</p></div></div>
+        <form className="recording-settings-form" onSubmit={saveStreamQuality}>
+          <div className="heading"><div><h2>Качество записи</h2><p>Выбранное качество применяется ко всем новым записям. Уже запущенные процессы не меняются.</p></div><span>{settings.stream_quality || 'best'}</span></div>
+          <label>Поток Twitch
+            <select value={settings.stream_quality || 'best'} onChange={event => changeStreamQuality(event.target.value)}>
+              {['best', '1080p60', '1080p', '720p60', '720p', '480p', '360p', 'worst'].map(value =>
+                <option key={value} value={value}>{value === 'best' ? 'Лучшее доступное' : value === 'worst' ? 'Худшее доступное' : value}</option>
+              )}
+            </select>
+            <small>Список фактически доступных вариантов зависит от трансляции. Streamlink не перекодирует видео, а выбирает готовый вариант Twitch.</small>
+          </label>
+          <button className="primary" type="submit" disabled={busy || !settingsDirty}><Settings />Сохранить качество</button>
+        </form>
         <div className="diagnostic-block">
           <h3>Настройки мониторинга</h3>
-          <div><span>Интервал проверки Twitch</span><b>{settings.poll_interval_seconds || '—'} сек.</b></div>
-          <div><span>Качество Streamlink</span><b>{settings.stream_quality || '—'}</b></div>
+          <div><span>Интервал проверки</span><b>{settings.poll_interval_seconds || '—'} сек.</b></div>
+          <div><span>Таймаут проверки Streamlink</span><b>{settings.stream_check_timeout_seconds || '—'} сек.</b></div>
+          <div><span>Способ обнаружения</span><b>Streamlink, без Helix</b></div>
           <div><span>Автоматическая очистка архива</span><b>Отключена</b></div>
         </div>
       </section>}
