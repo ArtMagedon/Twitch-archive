@@ -479,7 +479,7 @@ export default function App() {
               timestamp: channel.last_checked_at,
               message: channel.last_error,
               channel: channel.login,
-            })} />{channel.is_live && <small>{channel.viewer_count || 0} зрителей</small>}</div>
+            })} />{channel.is_live && channel.viewer_count !== null && channel.viewer_count !== undefined && <small>{channel.viewer_count} зрителей</small>}</div>
             <input className="toggle" type="checkbox" aria-label={`Мониторинг ${channel.login}`} checked={Boolean(channel.enabled)} onChange={event => setChannelEnabled(channel, event.target.checked)} />
             <button className="icon" onClick={() => removeChannel(channel)} title="Удалить канал"><Trash2 /></button>
           </div>)}

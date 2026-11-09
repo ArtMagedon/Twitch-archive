@@ -28,11 +28,13 @@ Docker-сервис для мониторинга публичных Twitch-ка
 
 1. Склонируйте репозиторий и перейдите в каталог проекта.
 2. Создайте конфигурацию: `cp .env.example .env`.
-3. При необходимости измените `POLL_INTERVAL_SECONDS` и `STREAM_QUALITY` в `.env`.
-4. Запустите: `docker compose up -d --build`.
+3. Укажите UID/GID пользователя хоста в `PUID` и `PGID` (узнать их можно командами `id -u` и `id -g`). Это нужно, чтобы Chromium запускался не от root и сохранял sandbox.
+4. Создайте каталоги данных: `mkdir -p data recordings`. Если они уже существуют и принадлежат root, исправьте владельца: `sudo chown -R $(id -u):$(id -g) data recordings`.
+5. При необходимости измените `POLL_INTERVAL_SECONDS` и `STREAM_QUALITY` в `.env`.
+6. Запустите: `docker compose up -d --build`.
 5. Откройте `http://SERVER_IP:8080`.
 
-Для OAuth Redirect URL можно указать `http://localhost`: пользовательский OAuth-поток не используется. Сервис не запрашивает Twitch App Access Token и не обращается к Twitch Helix API самостоятельно. Streamlink использует собственный Twitch plugin и необходимый внутренний процесс получения потока. Когда Twitch требует Client Integrity token, Streamlink вычисляет его через изолированный Chromium-браузер.
+Для OAuth Redirect URL можно указать `http://localhost`: пользовательский OAuth-поток не используется. Сервис не запрашивает Twitch App Access Token и не обращается к Twitch Helix API самостоятельно. Streamlink использует собственный Twitch plugin и необходимый внутренний процесс получения потока. Когда Twitch требует Client Integrity token, Streamlink вычисляет его через изолированный Chromium-браузер. Контейнер запускает приложение от UID/GID хостового пользователя (переменные `PUID`/`PGID`), чтобы не отключать Chromium sandbox.
 
 ## Конфигурация
 
