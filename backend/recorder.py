@@ -48,6 +48,9 @@ class Recorder:
         channel_id, login = channel["id"], channel["login"]
         if self.active(channel_id):
             return
+        pending = self.tasks.get(channel_id)
+        if pending is not None and not pending.done():
+            return
         remaining = self.retry_after.get(channel_id, 0) - time.monotonic()
         if remaining > 0:
             log.debug(

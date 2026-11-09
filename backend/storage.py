@@ -64,6 +64,15 @@ def discover_drives():
             if str(mountpoint).startswith(root_text + "/"):
                 under_host_root = True
                 break
+            if str(mountpoint) == root_text:
+                # Also allow a disk mounted directly on /mnt or /media,
+                # but do not mistake the ordinary bind mount of that directory for a disk.
+                try:
+                    under_host_root = os.stat(mountpoint).st_dev != os.stat(mountpoint.parent).st_dev
+                except OSError:
+                    under_host_root = False
+                if under_host_root:
+                    break
         if not under_host_root or filesystem in EXCLUDED_FILESYSTEMS:
             continue
         if not (
