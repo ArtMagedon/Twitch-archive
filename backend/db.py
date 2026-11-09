@@ -1,7 +1,7 @@
 import sqlite3
 from contextlib import contextmanager
 
-from .config import DATA_DIR, DB_PATH
+from .config import DATA_DIR, DB_PATH, STREAM_QUALITY
 
 
 @contextmanager
@@ -59,6 +59,10 @@ def init_db():
           value TEXT NOT NULL
         );
         """)
+        db.execute(
+            "INSERT OR IGNORE INTO app_settings(key,value) VALUES ('stream_quality',?)",
+            (STREAM_QUALITY,),
+        )
 
 
 def get_setting(key: str, default: str | None = None) -> str | None:

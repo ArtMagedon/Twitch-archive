@@ -7,8 +7,9 @@ from collections import deque
 from datetime import datetime, timezone
 
 from .config import STREAM_QUALITY
-from .db import get_db
+from .db import get_db, get_setting
 from .storage import resolve_recordings_dir
+from .streamlink_probe import streamlink_browser_available
 
 log = logging.getLogger("recorder")
 
@@ -110,7 +111,7 @@ class Recorder:
             )
             recording_id = cursor.lastrowid
 
-        executable = shutil.which("streamlink")
+        executable, chromium = streamlink_browser_available()
         if not executable:
             message = "Исполняемый файл Streamlink не найден в PATH контейнера."
             with get_db() as db:
@@ -127,15 +128,41 @@ class Recorder:
             )
             return
 
+        if not chromium:
+            message = "Chromium не найден. Он нужен Streamlink для получения Twitch Client Integrity token."
+            with get_db() as db:
+                db.execute(
+                    "UPDATE recordings SET status='error',ended_at=?,error=? WHERE id=?",
+                    (datetime.now(timezone.utc).isoformat(), message, recording_id),
+                )
+            self._schedule_retry(channel_id)
+            self.last_errors[channel_id] = message
+            log.error(
+                "%s",
+                message,
+                extra={"channel_id": channel_id, "channel": login, "recording_id": recording_id},
+            )
+            return
+
+        quality = get_setting("stream_quality", STREAM_QUALITY) or STREAM_QUALITY
         args = [
             executable,
+            "--no-config",
             "--force",
             "--loglevel",
             "info",
+            "--webbrowser",
+            "yes",
+            "--webbrowser-headless",
+            "yes",
+            "--webbrowser-executable",
+            chromium,
+            "--webbrowser-timeout",
+            "15",
             "--output",
             str(path),
             f"https://www.twitch.tv/{login}",
-            STREAM_QUALITY,
+            quality,
         ]
         try:
             process = await asyncio.create_subprocess_exec(
@@ -154,7 +181,7 @@ class Recorder:
                 "Streamlink запущен: @%s pid=%s quality=%s (recording id=%s)",
                 login,
                 process.pid,
-                STREAM_QUALITY,
+                quality,
                 recording_id,
                 extra={"channel_id": channel_id, "channel": login, "recording_id": recording_id},
             )
