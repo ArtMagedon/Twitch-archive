@@ -28,18 +28,16 @@ def _unescape_mount_path(value: str) -> str:
 
 
 def _host_visible_path(path: Path) -> str:
-    value = str(path)
-    for root in HOST_STORAGE_ROOTS:
-        root_text = str(root)
-        if value == root_text:
-            return "/" + root_text.removeprefix("/host/") 
-        if value.startswith(root_text.rstrip("/") + "/"):
-            return "/" + value[len("/host/"):]
-    return value
+    """Return the path as it exists on the host.
+
+    The host directory is now bind-mounted into the container at the same
+    absolute path, so no /host prefix translation is required.
+    """
+    return str(path)
 
 
 def discover_drives():
-    """Find mounted host block/network filesystems exposed through /mnt and /media."""
+    """Find mounted host block/network filesystems exposed through HOST_STORAGE_ROOTS."""
     found = {}
     try:
         lines = Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines()
@@ -54,7 +52,6 @@ def discover_drives():
             mountpoint = Path(_unescape_mount_path(fields[4]))
             filesystem = right_fields[0]
             source = _unescape_mount_path(right_fields[1]) if len(right_fields) > 1 else "unknown"
-            major_minor = fields[2]
         except (ValueError, IndexError):
             continue
 
@@ -65,8 +62,8 @@ def discover_drives():
                 under_host_root = True
                 break
             if str(mountpoint) == root_text:
-                # Also allow a disk mounted directly on /mnt or /media,
-                # but do not mistake the ordinary bind mount of that directory for a disk.
+                # Also allow a disk mounted directly on the exposed root,
+                # but do not mistake the bind mount itself for a disk.
                 try:
                     under_host_root = os.stat(mountpoint).st_dev != os.stat(mountpoint.parent).st_dev
                 except OSError:
@@ -91,8 +88,11 @@ def discover_drives():
         except OSError:
             continue
 
+        # Preserve IDs created by earlier versions, which hashed the old
+        # container path /host/media/<user>/... rather than /media/<user>/...
+        stable_mountpoint = f"/host{mountpoint}" if str(mountpoint).startswith("/media/") else str(mountpoint)
         identifier = hashlib.sha256(
-            f"{source}|{mountpoint}|{filesystem}".encode("utf-8")
+            f"{source}|{stable_mountpoint}|{filesystem}".encode("utf-8")
         ).hexdigest()[:16]
         label = mountpoint.name or Path(source).name or "Внешний диск"
         found[identifier] = {
@@ -185,7 +185,7 @@ def update_storage_device(device_id: str | None):
 
     drive = next((item for item in discover_drives() if item["id"] == device_id), None)
     if drive is None:
-        raise StorageUnavailableError("Выбранный диск больше не обнаруживается.")
+        raise StorageUnavailableError("Выбранный внешний диск больше не обнаруживается.")
     resolve_before = Path(drive["container_mountpoint"])
     if not os.access(resolve_before, os.W_OK):
         raise StorageUnavailableError("У контейнера нет прав на запись во внешний диск.")
