@@ -1,6 +1,8 @@
 import sqlite3
 from contextlib import contextmanager
+
 from .config import DATA_DIR, DB_PATH
+
 
 @contextmanager
 def get_db():
@@ -17,6 +19,7 @@ def get_db():
         raise
     finally:
         conn.close()
+
 
 def init_db():
     with get_db() as db:
@@ -51,19 +54,49 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_recordings_started ON recordings(started_at DESC);
         CREATE INDEX IF NOT EXISTS idx_recordings_channel ON recordings(channel_id);
+        CREATE TABLE IF NOT EXISTS app_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
         """)
 
-def reconcile_interrupted_recordings(recordings_dir):
-    """Close database entries left active by an unclean container shutdown."""
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    with get_db() as db:
+        row = db.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str | None):
+    with get_db() as db:
+        if value is None or value == "":
+            db.execute("DELETE FROM app_settings WHERE key=?", (key,))
+        else:
+            db.execute(
+                "INSERT INTO app_settings(key,value) VALUES (?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+
+
+def reconcile_interrupted_recordings(recordings_dir=None):
+    """Close recording rows left active by an unclean container shutdown."""
     from datetime import datetime, timezone
     from pathlib import Path
-    base = Path(recordings_dir).resolve()
+
     with get_db() as db:
-        rows = db.execute("SELECT id,file_path FROM recordings WHERE status IN ('starting','recording')").fetchall()
+        rows = db.execute(
+            "SELECT id,file_path FROM recordings WHERE status IN ('starting','recording')"
+        ).fetchall()
         for row in rows:
-            path = Path(row["file_path"]).resolve()
-            size = path.stat().st_size if base in path.parents and path.is_file() else 0
+            path = Path(row["file_path"]) if row["file_path"] else None
+            try:
+                size = path.stat().st_size if path and path.is_file() else 0
+            except OSError:
+                size = 0
             status = "interrupted" if size > 0 else "error"
             error = "Контейнер был остановлен до штатного завершения записи"
-            db.execute("UPDATE recordings SET status=?,ended_at=?,file_size=?,error=? WHERE id=?",
-                       (status, datetime.now(timezone.utc).isoformat(), size, error, row["id"]))
+            db.execute(
+                "UPDATE recordings SET status=?,ended_at=?,file_size=?,error=? WHERE id=?",
+                (status, datetime.now(timezone.utc).isoformat(), size, error, row["id"]),
+            )

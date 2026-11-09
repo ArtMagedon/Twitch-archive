@@ -9,11 +9,24 @@ services:
       DATA_DIR: /data
       RECORDINGS_DIR: /recordings
       FRONTEND_DIST: /app/frontend/dist
+      HOST_STORAGE_ROOTS: /host/mnt,/host/media
     ports:
       - "8080:8000"
     volumes:
       - ./data:/data
       - ./recordings:/recordings
+      # Receive host mount/unmount events for external drives.
+      # Drives must be mounted by the host under /mnt or /media.
+      - type: bind
+        source: /mnt
+        target: /host/mnt
+        bind:
+          propagation: rslave
+      - type: bind
+        source: /media
+        target: /host/media
+        bind:
+          propagation: rslave
     stop_grace_period: 30s
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
